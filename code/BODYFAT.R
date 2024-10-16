@@ -194,3 +194,59 @@ results_df <- data.frame(
 )
 
 print(results_df)
+
+write.csv(d, "data_new.csv", row.names = FALSE)
+write.csv(results_df, "results.csv", row.names = FALSE)
+
+# Trade off
+dn <- read.csv("data_new.csv")
+model_names <- c(
+  "BODYFAT ~ AGE + WEIGHT + NECK + ABDOMEN + THIGH + FOREARM + WRIST",  
+  "BODYFAT ~ ABDOMEN ",  
+  "BODYFAT ~ WEIGHT + ABDOMEN",  
+  "BODYFAT ~ ABDOMEN * WEIGHT",  
+  "BODYFAT ~ ABDOMEN_squared", 
+  "BODYFAT ~ ABDOMEN_squared + WEIGHT",  
+  "BODYFAT ~ ABDOMEN + ABDOMEN_squared + WEIGHT"  
+)
+
+#add noise N(0, sd(y)*0.1) for each column y
+add_noise <- function(y, noise_level = 0.1) {
+    noise_sd = sd(y)
+    return(y + rnorm(length(y), mean = 0, sd = (noise_level* noise_sd)  ))
+}
+#metric = mse
+metric <- function(predictions, actual) {
+  return(mean((predictions - actual)^2))
+}
+#Robustness test
+folds <- createFolds(dn$BODYFAT, k = 10, list = TRUE)
+mse_list <- matrix(0, nrow = 10, ncol = 7)
+mse_list_noisy <- matrix(0, nrow = 10, ncol = 7)
+for(i in 1:10) {
+  test_index <- folds[[i]]
+  trainset <- dn[-test_index,]
+  testset <- dn[test_index,]
+  trainset_noisy <- as.data.frame(lapply(trainset,add_noise))
+  for (j in 1:7) {
+      model_formula <- model_names[j]
+      model <- lm(as.formula(model_formula), data = trainset)
+      predictions <- predict(model, newdata = testset)
+      mse <- metric(predictions, testset$BODYFAT)
+      mse_list[i,j]<-mse
+
+      model_noisy <- lm(as.formula(model_formula), data = trainset_noisy)
+      predictions_noisy <- predict(model_noisy, newdata = testset)
+      mse_noisy <- metric(predictions_noisy, testset$BODYFAT)
+      mse_list_noisy[i,j]<-mse_noisy
+  }
+}
+average_mse <- colMeans(mse_list)
+average_mse_noisy <- colMeans(mse_list_noisy)
+retention_rate <- 1 - abs(average_mse_noisy - average_mse) / average_mse
+
+results_df = read.csv("results.csv")
+results_df$retention_MSE_rate = retention_rate
+results_df$num_predictors = c(7, 1, 2, 1, 1, 2, 3)
+
+# Model Diagnostics
