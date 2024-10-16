@@ -194,3 +194,113 @@ results_df <- data.frame(
 )
 
 print(results_df)
+
+write.csv(d, "data_new.csv", row.names = FALSE)
+write.csv(results_df, "results.csv", row.names = FALSE)
+
+# Trade-off
+dn <- read.csv("data_new.csv")
+model_names <- c(
+  "BODYFAT ~ AGE + WEIGHT + NECK + ABDOMEN + THIGH + FOREARM + WRIST",  
+  "BODYFAT ~ ABDOMEN ",  
+  "BODYFAT ~ WEIGHT + ABDOMEN",  
+  "BODYFAT ~ ABDOMEN * WEIGHT",  
+  "BODYFAT ~ ABDOMEN_squared", 
+  "BODYFAT ~ ABDOMEN_squared + WEIGHT",  
+  "BODYFAT ~ ABDOMEN + ABDOMEN_squared + WEIGHT"  
+)
+
+#robustness test-add_noise
+add_noise <- function(y, noise_level = 0.1) {
+    # for each column y, add N(0, sd(y)* noise_sd)
+    noise_sd = sd(y)
+    return(y + rnorm(length(y), mean = 0, sd = (noise_level* noise_sd)  ))
+}
+#metric = mse
+metric <- function(predictions, actual) {
+  return(mean((predictions - actual)^2))
+}
+
+#robustness test-cv
+folds <- createFolds(dn$BODYFAT, k = 10, list = TRUE)
+mse_list <- matrix(0, nrow = 10, ncol = 7)
+mse_list_noisy <- matrix(0, nrow = 10, ncol = 7)
+for(i in 1:10) {
+  test_index <- folds[[i]]
+  trainset <- dn[-test_index,]
+  testset <- dn[test_index,]
+  trainset_noisy <- as.data.frame(lapply(trainset,add_noise))
+  for (j in 1:7) {
+      model_formula <- model_names[j]
+      model <- lm(as.formula(model_formula), data = trainset)
+      predictions <- predict(model, newdata = testset)
+      mse <- metric(predictions, testset$BODYFAT)
+      mse_list[i,j]<-mse
+
+      model_noisy <- lm(as.formula(model_formula), data = trainset_noisy)
+      predictions_noisy <- predict(model_noisy, newdata = testset)
+      mse_noisy <- metric(predictions_noisy, testset$BODYFAT)
+      mse_list_noisy[i,j]<-mse_noisy
+  }
+}
+average_mse <- colMeans(mse_list)
+average_mse_noisy <- colMeans(mse_list_noisy)
+retention_rate <- 1 - abs(average_mse_noisy - average_mse) / average_mse
+
+results_df = read.csv("results.csv")
+results_df$retention_MSE_rate = retention_rate
+results_df$num_predictors = c(7, 1, 2, 1, 1, 2, 3)
+print(results_df)
+
+# Model Diagnostics
+library(ggplot2)
+dn <- read.csv("data_new.csv")
+model_names <- c(
+  "BODYFAT ~ AGE + WEIGHT + NECK + ABDOMEN + THIGH + FOREARM + WRIST",  
+  "BODYFAT ~ ABDOMEN ",  
+  "BODYFAT ~ WEIGHT + ABDOMEN",  
+  "BODYFAT ~ ABDOMEN * WEIGHT",  
+  "BODYFAT ~ ABDOMEN_squared", 
+  "BODYFAT ~ ABDOMEN_squared + WEIGHT",  
+  "BODYFAT ~ ABDOMEN + ABDOMEN_squared + WEIGHT"  
+)
+
+models <- list()
+for (i in 1:length(model_names)) {
+  models[[i]] <- lm(as.formula(model_names[i]), data = dn)
+}
+
+#Full model res plot
+png("Residual_Plots.png", width = 1000, height = 1000)  
+options(repr.plot.width = 10, repr.plot.height = 10)
+par(mfrow = c(4, 2), mar = c(3, 3, 2, 1), oma = c(0, 0, 2, 0))
+for (i in 1:length(models)) {
+  plot(residuals(models[[i]]),   col = "blue", pch = 19)
+  abline(h = 0, col = "red", lty = 2)
+     mtext(model_names[i], side = 3, line = 0.5, cex = 0.8)  
+}
+title("Residual Plots for Different Models", outer = TRUE, cex.main = 1.5)
+dev.off()
+
+#Full model QQ plot
+png("QQ_Plots.png", width = 1000, height = 1000)  # 指定保存为png，设置尺寸
+par(mfrow = c(4, 2), mar = c(3, 3, 2, 1), oma = c(0, 0, 2, 0))
+for (i in 1:length(models)) {
+  qqnorm(residuals(models[[i]]), main = '', col = "blue", pch = 19)
+  qqline(residuals(models[[i]]), col = "red", lty = 2)
+    mtext(model_names[i], side = 3, line = 0.5, cex = 0.8)  
+}
+title("QQ Plots for Different Models", outer = TRUE, cex.main = 1.5)
+dev.off()
+
+# Final_model Final_model = "BODYFAT ~ WEIGHT + ABDOMEN"
+model_name = "BODYFAT ~ WEIGHT + ABDOMEN"
+model <- lm(as.formula(model_name), data = dn)
+#Final_model res
+plot(residuals(model),   col = "blue", pch = 9)
+abline(h = 0, col = "red", lty = 2)
+mtext(paste('Res for',model_name), side = 3, line = 0.5, cex = 1)  
+#Final_model QQ
+qqnorm(residuals(model), main = '', col = "blue", pch = 9)
+qqline(residuals(model), col = "red", lty = 2)
+mtext(paste('QQ for ',model_name), side = 3, line = 0.5, cex = 1)  
